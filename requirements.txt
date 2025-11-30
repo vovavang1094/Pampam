@@ -1,0 +1,10 @@
+python-telegram-bot==20.8
+python-dotenv
+ccxt
+aiohttp
+aiolimiter
+hmac
+hashlib
+logging
+asyncio
+time
