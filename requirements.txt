@@ -3,8 +3,3 @@ python-dotenv
 ccxt
 aiohttp
 aiolimiter
-hmac
-hashlib
-logging
-asyncio
-time
