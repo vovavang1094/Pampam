@@ -34,17 +34,17 @@ SHOW_INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"]
 ADD_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "8h"]
 
 # Символы для статуса уведомлений
-NOTIFY_EMOJI = "Enabled"
-DISABLED_EMOJI = "Disabled"
+NOTIFY_EMOJI = "✅"
+DISABLED_EMOJI = "❌"
 
 
 # ====================== ВИЗУАЛЬНЫЕ ЭЛЕМЕНТЫ ======================
 def main_menu():
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("Add Alert", callback_data="add")],
-            [InlineKeyboardButton("My Alerts", callback_data="list")],
-            [InlineKeyboardButton("Delete Alert", callback_data="delete")],
+            [InlineKeyboardButton("➕ Добавить алерт", callback_data="add")],
+            [InlineKeyboardButton("📋 Мои алерты", callback_data="list")],
+            [InlineKeyboardButton("❌ Удалить алерт", callback_data="delete")],
         ]
     )
 
@@ -53,20 +53,20 @@ def intervals_kb():
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("1m", callback_data="int_1m"),
-                InlineKeyboardButton("5m", callback_data="int_5m"),
-                InlineKeyboardButton("15m", callback_data="int_15m"),
+                InlineKeyboardButton("⏱ 1m", callback_data="int_1m"),
+                InlineKeyboardButton("⏱ 5m", callback_data="int_5m"),
+                InlineKeyboardButton("⏱ 15m", callback_data="int_15m"),
             ],
             [
-                InlineKeyboardButton("30m", callback_data="int_30m"),
-                InlineKeyboardButton("1h", callback_data="int_1h"),
-                InlineKeyboardButton("4h", callback_data="int_4h"),
+                InlineKeyboardButton("⏱ 30m", callback_data="int_30m"),
+                InlineKeyboardButton("🕐 1h", callback_data="int_1h"),
+                InlineKeyboardButton("🕓 4h", callback_data="int_4h"),
             ],
             [
-                InlineKeyboardButton("8h", callback_data="int_8h"),
-                InlineKeyboardButton("1d", callback_data="int_1d"),
+                InlineKeyboardButton("🕗 8h", callback_data="int_8h"),
+                InlineKeyboardButton("📅 1d", callback_data="int_1d"),
             ],
-            [InlineKeyboardButton("Back", callback_data="back")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back")],
         ]
     )
 
@@ -82,8 +82,8 @@ def volume_kb():
                 InlineKeyboardButton("4000", callback_data="volbtn_4000"),
                 InlineKeyboardButton("5000", callback_data="volbtn_5000"),
             ],
-            [InlineKeyboardButton("Custom", callback_data="vol_custom")],
-            [InlineKeyboardButton("Back", callback_data="back")],
+            [InlineKeyboardButton("✏️ Ввести вручную", callback_data="vol_custom")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back")],
         ]
     )
 
@@ -105,9 +105,9 @@ def list_kb(chat_id):
         )
     if sets:
         kb.append(
-            [InlineKeyboardButton("Refresh All", callback_data="refresh_all")]
+            [InlineKeyboardButton("🔄 Обновить все", callback_data="refresh_all")]
         )
-    kb.append([InlineKeyboardButton("Back", callback_data="back")])
+    kb.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
     return InlineKeyboardMarkup(kb)
 
 
@@ -132,6 +132,7 @@ async def load_symbols():
                     logging.info(f"Loaded {len(ALL_SYMBOLS)} symbols")
     except Exception as e:
         logging.error(f"Error loading symbols: {e}")
+        # Запасные символы
         ALL_SYMBOLS = {
             "BTCUSDT",
             "ETHUSDT",
@@ -199,15 +200,15 @@ async def monitor_volumes(app):
                         ):
                             url = f"https://www.mexc.com/ru-RU/futures/{s['symbol'][:-4]}_USDT"
                             kb = InlineKeyboardMarkup(
-                                [[InlineKeyboardButton("Go to MEXC", url=url)]]
+                                [[InlineKeyboardButton("🔹 Перейти на MEXC", url=url)]]
                             )
                             await app.bot.send_message(
                                 chat_id,
-                                f"<b>VOLUME SPIKE!</b>\n\n"
-                                f"<b>Pair:</b> {s['symbol']}\n"
-                                f"<b>Timeframe:</b> {s['interval']}\n"
-                                f"<b>Threshold:</b> {s['threshold']:,} USDT\n"
-                                f"<b>Current volume:</b> {vol:,} USDT",
+                                f"<b>🚀 ВСПЛЕСК ОБЪЁМА!</b>\n\n"
+                                f"<b>Пара:</b> {s['symbol']}\n"
+                                f"<b>Таймфрейм:</b> {s['interval']}\n"
+                                f"<b>Порог:</b> {s['threshold']:,} USDT\n"
+                                f"<b>Текущий объем:</b> {vol:,} USDT",
                                 parse_mode="HTML",
                                 reply_markup=kb,
                             )
@@ -225,30 +226,34 @@ async def show_volumes(update: Update, context: ContextTypes.DEFAULT_TYPE, symbo
     await q.answer()
 
     try:
+        # Показываем анимацию загрузки
         await q.edit_message_text(
-            f"<b>Loading data for {symbol}...</b>", parse_mode="HTML"
+            f"<b>🔍 Загружаем данные для {symbol}...</b>", parse_mode="HTML"
         )
 
+        # Получаем объемы
         tasks = [fetch_volume(symbol, tf) for tf in SHOW_INTERVALS]
         results = await asyncio.gather(*tasks)
         vols = dict(zip(SHOW_INTERVALS, results))
 
-        text = f"<b>Volumes {symbol}</b>\n<i>{time.strftime('%H:%M:%S')}</i>\n\n"
+        # Форматируем сообщение
+        text = f"<b>📊 Объемы {symbol}</b>\n<i>🕒 {time.strftime('%H:%M:%S')}</i>\n\n"
         for tf in SHOW_INTERVALS:
             v = vols[tf]
-            emoji = "Green" if v > 10000000 else "Yellow" if v > 1000000 else "Red"
+            emoji = "🟢" if v > 10000000 else "🟡" if v > 1000000 else "🔴"
             text += f"{emoji} <code>{tf.rjust(3)}</code> → <b>{v:,} USDT</b>\n"
 
+        # Создаем клавиатуру
         kb = InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("Refresh", callback_data=f"ref_{symbol}")],
+                [InlineKeyboardButton("🔄 Обновить", callback_data=f"ref_{symbol}")],
                 [
                     InlineKeyboardButton(
-                        "MEXC",
+                        "🔹 MEXC",
                         url=f"https://www.mexc.com/ru-RU/futures/{symbol[:-4]}_USDT",
                     )
                 ],
-                [InlineKeyboardButton("Back", callback_data="list")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="list")],
             ]
         )
 
@@ -257,54 +262,13 @@ async def show_volumes(update: Update, context: ContextTypes.DEFAULT_TYPE, symbo
     except Exception as e:
         logging.error(f"Error showing volumes: {e}")
         await q.edit_message_text(
-            "Error loading data. Try again later.", reply_markup=main_menu()
+            "⚠️ Ошибка при загрузке данных. Попробуйте позже.", reply_markup=main_menu()
         )
-
-
-# НОВАЯ ФУНКЦИЯ: показ объёмов при нажатии на алерт
-async def show_alert_with_volumes(q: Update.callback_query, symbol: str, interval: str, threshold: int, enabled: bool):
-    try:
-        await q.edit_message_text("<b>Loading current volumes...</b>", parse_mode="HTML")
-
-        tasks = [fetch_volume(symbol, tf) for tf in SHOW_INTERVALS]
-        results = await asyncio.gather(*tasks)
-        vols = dict(zip(SHOW_INTERVALS, results))
-
-        status = NOTIFY_EMOJI if enabled else DISABLED_EMOJI
-
-        text = (
-            f"<b>Alert Settings:</b>\n\n"
-            f"<b>Pair:</b> {symbol}\n"
-            f"<b>Timeframe:</b> {interval}\n"
-            f"<b>Threshold:</b> {threshold:,} USDT\n"
-            f"<b>Notifications:</b> {status}\n\n"
-            f"<b>Current volumes:</b>\n"
-        )
-
-        for tf in SHOW_INTERVALS:
-            v = vols[tf]
-            emoji = "Green" if v > 10000000 else "Yellow" if v > 1000000 else "Red"
-            text += f"{emoji} <code>{tf.rjust(3)}</code> → <b>{v:,} USDT</b>\n"
-
-        kb = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton("Go to MEXC", url=f"https://www.mexc.com/ru-RU/futures/{symbol[:-4]}_USDT"),
-                    InlineKeyboardButton(f"Notifications: {status}", callback_data=f"toggle_notify_{q.message.chat_id}_{symbol}_{interval}"),
-                ],
-                [InlineKeyboardButton("Back", callback_data="list")],
-            ]
-        )
-
-        await q.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
-    except Exception as e:
-        logging.error(f"Error in show_alert_with_volumes: {e}")
-        await q.edit_message_text("Error loading volumes.", reply_markup=main_menu())
 
 
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
-        await update.message.reply_text("Access denied")
+        await update.message.reply_text("🚫 Доступ запрещён")
         return
 
     chat_id = update.effective_chat.id
@@ -313,11 +277,11 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not text or "меню" in text or "start" in text or "привет" in text:
         await update.message.reply_text(
-            "<b>MEXC Volume Tracker</b>\n\n"
-            "Real-time volume tracking\n"
-            "Instant spike alerts\n"
-            "Works 24/7\n\n"
-            "Choose action:",
+            "🔥 <b>MEXC Volume Tracker</b> 🔥\n\n"
+            "📈 Отслеживание объемов в реальном времени\n"
+            "🔔 Мгновенные уведомления о всплесках\n"
+            "⚡ Работает 24/7 без перерывов\n\n"
+            "Выберите действие:",
             parse_mode="HTML",
             reply_markup=main_menu(),
         )
@@ -331,14 +295,14 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if sym not in ALL_SYMBOLS:
             await update.message.reply_text(
-                f"Pair <b>{sym}</b> not found", parse_mode="HTML"
+                f"⚠️ Пара <b>{sym}</b> не найдена", parse_mode="HTML"
             )
             return
 
         user_temp[chat_id] = {"symbol": sym}
         user_state[chat_id] = "wait_interval"
         await update.message.reply_text(
-            f"Pair: <b>{sym}</b>\n" "Choose timeframe:",
+            f"✅ Пара: <b>{sym}</b>\n" "Выберите таймфрейм:",
             parse_mode="HTML",
             reply_markup=intervals_kb(),
         )
@@ -351,23 +315,27 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "edit_threshold_custom",
     ]:
         try:
+            # Обработка ручного ввода порога
             raw_text = update.message.text.strip()
+            # Удаляем пробелы и буквы, оставляем только цифры
             threshold_value = int("".join(filter(str.isdigit, raw_text)))
             if threshold_value < 1000:
                 raise ValueError
         except:
             await update.message.reply_text(
-                "Enter number ≥ 1000 (e.g. 2000, 5000, 10000)"
+                "⚠️ Введите число ≥ 1000 (например: 2000, 5000, 10000)"
             )
             return
 
+        # Определяем режим (редактирование или добавление)
         is_edit_mode = state in ["edit_threshold", "edit_threshold_custom"]
 
+        # Обновление или добавление алерта
         if is_edit_mode:
             idx = user_temp[chat_id].get("edit_idx", 0)
             s = user_settings[chat_id][idx]
             s["threshold"] = threshold_value
-            response_text = f"Alert updated!\n<b>{s['symbol']} {s['interval']}</b>\nThreshold: {threshold_value:,} USDT"
+            response_text = f"✅ Алерт обновлен!\n<b>{s['symbol']} {s['interval']}</b>\nПорог: {threshold_value:,} USDT"
         else:
             user_settings[chat_id].append(
                 {
@@ -375,15 +343,16 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "interval": user_temp[chat_id]["interval"],
                     "threshold": threshold_value,
                     "last_notified": 0,
-                    "notifications_enabled": True,
+                    "notifications_enabled": True,  # По умолчанию включены
                 }
             )
-            response_text = f"Alert added!\n<b>{user_temp[chat_id]['symbol']} {user_temp[chat_id]['interval']}</b>\nThreshold: {threshold_value:,} USDT"
+            response_text = f"✅ Алерт добавлен!\n<b>{user_temp[chat_id]['symbol']} {user_temp[chat_id]['interval']}</b>\nПорог: {threshold_value:,} USDT"
 
         await update.message.reply_text(
             response_text, parse_mode="HTML", reply_markup=main_menu()
         )
 
+        # Сброс состояний
         user_state.pop(chat_id, None)
         user_temp.pop(chat_id, None)
         return
@@ -398,18 +367,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = q.data
     chat_id = q.message.chat_id
 
+    # Обработка основных команд
     if data == "back":
         user_state.pop(chat_id, None)
         user_temp.pop(chat_id, None)
-        await q.edit_message_text("Main menu", reply_markup=main_menu())
+        await q.edit_message_text("Главное меню", reply_markup=main_menu())
         return
 
     if data == "add":
         user_state[chat_id] = "wait_symbol"
         await q.edit_message_text(
-            "Enter coin ticker (e.g. BTC, ETH, SOL):",
+            "Введите тикер монеты (например: BTC, ETH, SOL):",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Cancel", callback_data="back")]]
+                [[InlineKeyboardButton("❌ Отмена", callback_data="back")]]
             ),
         )
         return
@@ -418,9 +388,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = list_kb(chat_id)
         await q.edit_message_text(
             (
-                "Your active alerts:"
+                "📋 Ваши активные алерты:"
                 if user_settings.get(chat_id)
-                else "You have no active alerts"
+                else "ℹ️ У вас нет активных алертов"
             ),
             reply_markup=kb if kb else main_menu(),
         )
@@ -429,7 +399,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "delete":
         if not user_settings.get(chat_id):
             await q.edit_message_text(
-                "No alerts to delete", reply_markup=main_menu()
+                "ℹ️ Нет алертов для удаления", reply_markup=main_menu()
             )
             return
 
@@ -443,20 +413,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 ]
             )
-        kb.append([InlineKeyboardButton("Back", callback_data="back")])
+        kb.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
 
         await q.edit_message_text(
-            "Choose alert to delete:", reply_markup=InlineKeyboardMarkup(kb)
+            "❌ Выберите алерт для удаления:", reply_markup=InlineKeyboardMarkup(kb)
         )
         return
 
+    # Обработка конкретных действий
     if data.startswith("del_"):
         idx = int(data.split("_")[1])
         symbol = user_settings[chat_id][idx]["symbol"]
         del user_settings[chat_id][idx]
         await q.edit_message_text(
-            f"Alert for {symbol} deleted", reply_markup=main_menu()
+            f"✅ Алерт для {symbol} удален", reply_markup=main_menu()
         )
+        return
+
+    if data.startswith("showvol_"):
+        idx = int(data.split("_")[1])
+        await show_volumes(update, context, user_settings[chat_id][idx]["symbol"])
         return
 
     if data.startswith("ref_"):
@@ -464,35 +440,83 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_volumes(update, context, symbol)
         return
 
-    # ГЛАВНОЕ ИЗМЕНЕНИЕ: при нажатии на алерт — показываем и настройки, и текущие объёмы
+    if data.startswith("edit_"):
+        idx = int(data.split("_")[1])
+        user_temp[chat_id] = {"edit_idx": idx}
+        user_state[chat_id] = "edit_interval"
+        s = user_settings[chat_id][idx]
+        await q.edit_message_text(
+            f"✏️ Редактирование алерта:\n"
+            f"<b>{s['symbol']} {s['interval']}</b>\n"
+            f"Текущий порог: {s['threshold']:,} USDT\n\n"
+            "Выберите новый таймфрейм:",
+            parse_mode="HTML",
+            reply_markup=intervals_kb(),
+        )
+        return
+
     if data.startswith("alert_options_"):
         idx = int(data.split("_")[2])
         s = user_settings[chat_id][idx]
-        await show_alert_with_volumes(
-            q,
-            symbol=s["symbol"],
-            interval=s["interval"],
-            threshold=s["threshold"],
-            enabled=s.get("notifications_enabled", True)
+        status = (
+            NOTIFY_EMOJI if s.get("notifications_enabled", True) else DISABLED_EMOJI
+        )
+        kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        f"🔹 Перейти на MEXC",
+                        url=f"https://www.mexc.com/ru-RU/futures/{s['symbol'][:-4]}_USDT",
+                    ),
+                    InlineKeyboardButton(
+                        f"Уведомления: {status}", callback_data=f"toggle_notify_{idx}"
+                    ),
+                ],
+                [InlineKeyboardButton("🔙 Назад", callback_data="list")],
+            ]
+        )
+        await q.edit_message_text(
+            f"<b>Настройки алерта:</b>\n\n"
+            f"<b>Пара:</b> {s['symbol']}\n"
+            f"<b>Таймфрейм:</b> {s['interval']}\n"
+            f"<b>Порог:</b> {s['threshold']:,} USDT",
+            parse_mode="HTML",
+            reply_markup=kb,
         )
         return
 
     if data.startswith("toggle_notify_"):
-        parts = data.split("_")
-        if len(parts) >= 4:
-            idx = int(parts[2])
-        else:
-            # fallback
-            idx = int(parts[2]) if len(parts) > 2 else 0
+        idx = int(data.split("_")[2])
         s = user_settings[chat_id][idx]
         s["notifications_enabled"] = not s.get("notifications_enabled", True)
         new_status = NOTIFY_EMOJI if s["notifications_enabled"] else DISABLED_EMOJI
         await q.answer(
-            f"Notifications {'enabled' if s['notifications_enabled'] else 'disabled'}",
+            f"Уведомления {'включены' if s['notifications_enabled'] else 'выключены'}",
             show_alert=True,
         )
-        # Обновляем с новыми объёмами
-        await show_alert_with_volumes(q, s["symbol"], s["interval"], s["threshold"], s["notifications_enabled"])
+        # Show updated options
+        await q.edit_message_text(
+            f"<b>Настройки алерта:</b>\n\n"
+            f"<b>Пара:</b> {s['symbol']}\n"
+            f"<b>Таймфрейм:</b> {s['interval']}\n"
+            f"<b>Порог:</b> {s['threshold']:,} USDT",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            f"🔹 Перейти на MEXC",
+                            url=f"https://www.mexc.com/ru-RU/futures/{s['symbol'][:-4]}_USDT",
+                        ),
+                        InlineKeyboardButton(
+                            f"Уведомления: {new_status}",
+                            callback_data=f"toggle_notify_{idx}",
+                        ),
+                    ],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="list")],
+                ]
+            ),
+        )
         return
 
     if data.startswith("int_"):
@@ -501,7 +525,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_temp[chat_id]["interval"] = interval
             user_state[chat_id] = "edit_threshold"
             await q.edit_message_text(
-                f"New timeframe: <b>{interval}</b>\nChoose volume threshold:",
+                f"🆕 Новый таймфрейм: <b>{interval}</b>\n" "Выберите порог объема:",
                 parse_mode="HTML",
                 reply_markup=volume_kb(),
             )
@@ -509,7 +533,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_temp[chat_id]["interval"] = interval
             user_state[chat_id] = "wait_threshold"
             await q.edit_message_text(
-                f"Timeframe: <b>{interval}</b>\nChoose volume threshold:",
+                f"✅ Таймфрейм: <b>{interval}</b>\n" "Выберите порог объема:",
                 parse_mode="HTML",
                 reply_markup=volume_kb(),
             )
@@ -523,9 +547,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 s = user_settings[chat_id][idx]
                 s["threshold"] = volume
                 await q.edit_message_text(
-                    f"Alert updated!\n"
+                    f"✅ Алерт обновлен!\n"
                     f"<b>{s['symbol']} {s['interval']}</b>\n"
-                    f"Threshold: {volume:,} USDT",
+                    f"Порог: {volume:,} USDT",
                     parse_mode="HTML",
                     reply_markup=main_menu(),
                 )
@@ -540,29 +564,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     }
                 )
                 await q.edit_message_text(
-                    f"Alert added!\n"
+                    f"✅ Алерт добавлен!\n"
                     f"<b>{user_temp[chat_id]['symbol']} {user_temp[chat_id]['interval']}</b>\n"
-                    f"Threshold: {volume:,} USDT",
+                    f"Порог: {volume:,} USDT",
                     parse_mode="HTML",
                     reply_markup=main_menu(),
                 )
 
+            # Сброс состояния
             user_state.pop(chat_id, None)
             user_temp.pop(chat_id, None)
         except Exception as e:
             logging.error(f"Error processing volume button: {e}")
-            await q.answer("Error processing", show_alert=True)
+            await q.answer("Произошла ошибка при обработке", show_alert=True)
         return
 
     if data == "vol_custom":
+        # Определяем состояние (редактирование или добавление)
         is_edit = user_state.get(chat_id) == "edit_threshold"
         state_name = "edit_threshold_custom" if is_edit else "wait_threshold_custom"
         user_state[chat_id] = state_name
 
         await q.edit_message_text(
-            "Enter volume threshold in USDT (e.g. 2000, 5000, 10000):",
+            "✏️ Введите порог объема в USDT (например: 2000, 5000, 10000):",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Back", callback_data="back")]]
+                [[InlineKeyboardButton("🔙 Назад", callback_data="back")]]
             ),
         )
         return
@@ -577,7 +603,7 @@ def main():
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, any_message))
     app.add_handler(CallbackQueryHandler(button_handler))
-    print("MEXC Volume Bot with BEAUTIFUL BUTTONS started!")
+    print("🔥 MEXC Volume Bot с КРАСИВЫМИ КНОПКАМИ запущен! 🔥")
     app.run_polling(drop_pending_updates=True)
 
 
