@@ -269,7 +269,8 @@ async def show_alert_details_with_volumes(update: Update, context: ContextTypes.
     q = update.callback_query
     await q.answer()
     
-    s = user_settings[q.message.chat_id][idx]
+    chat_id = q.message.chat_id
+    s = user_settings[chat_id][idx]
     symbol = s["symbol"]
     
     # Загружаем объёмы
@@ -294,9 +295,16 @@ async def show_alert_details_with_volumes(update: Update, context: ContextTypes.
         emoji = "High" if v > 10_000_000 else "Medium" if v > 1_000_000 else "Low"
         text += f"{emoji} <code>{tf.rjust(3)}</code> → <b>{v:,} USDT</b>\n"
     
+    # ←←←←← ВЕРНУЛИ КНОПКУ ПЕРЕКЛЮЧЕНИЯ УВЕДОМЛЕНИЙ
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Перейти на MEXC", 
-            url=f"https://www.mexc.com/ru-RU/futures/{symbol[:-4]}_USDT")],
+        [
+            InlineKeyboardButton("Перейти на MEXC", 
+                url=f"https://www.mexc.com/ru-RU/futures/{symbol[:-4]}_USDT"),
+            InlineKeyboardButton(
+                f"Уведомления: {status}",
+                callback_data=f"toggle_notify_{idx}"   # ← вот она!
+            ),
+        ],
         [InlineKeyboardButton("Назад", callback_data="list")],
     ])
     
@@ -620,4 +628,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
