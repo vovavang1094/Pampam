@@ -3,7 +3,9 @@ services:
   - type: web
     name: mexcbot
     env: python
+    runtime: python3.12.7
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python MexcBot.py  
+
     autoDeploy: true
