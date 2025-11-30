@@ -265,6 +265,42 @@ async def show_volumes(update: Update, context: ContextTypes.DEFAULT_TYPE, symbo
             "⚠️ Ошибка при загрузке данных. Попробуйте позже.", reply_markup=main_menu()
         )
 
+async def show_alert_details_with_volumes(update: Update, context: ContextTypes.DEFAULT_TYPE, idx: int):
+    q = update.callback_query
+    await q.answer()
+    
+    s = user_settings[q.message.chat_id][idx]
+    symbol = s["symbol"]
+    
+    # Загружаем объёмы
+    await q.edit_message_text("<b>Загружаем текущие объёмы...</b>", parse_mode="HTML")
+    tasks = [fetch_volume(symbol, tf) for tf in SHOW_INTERVALS]
+    results = await asyncio.gather(*tasks)
+    vols = dict(zip(SHOW_INTERVALS, results))
+    
+    status = NOTIFY_EMOJI if s.get("notifications_enabled", True) else DISABLED_EMOJI
+    
+    text = (
+        f"<b>Настройки алерта:</b>\n\n"
+        f"<b>Пара:</b> {symbol}\n"
+        f"<b>Таймфрейм:</b> {s['interval']}\n"
+        f"<b>Порог:</b> {s['threshold']:,} USDT\n"
+        f"<b>Уведомления:</b> {status}\n\n"
+        f"<b>Текущие объёмы:</b>\n"
+    )
+    
+    for tf in SHOW_INTERVALS:
+        v = vols[tf]
+        emoji = "High" if v > 10_000_000 else "Medium" if v > 1_000_000 else "Low"
+        text += f"{emoji} <code>{tf.rjust(3)}</code> → <b>{v:,} USDT</b>\n"
+    
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Перейти на MEXC", 
+            url=f"https://www.mexc.com/ru-RU/futures/{symbol[:-4]}_USDT")],
+        [InlineKeyboardButton("Назад", callback_data="list")],
+    ])
+    
+    await q.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
 
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
@@ -457,32 +493,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("alert_options_"):
         idx = int(data.split("_")[2])
-        s = user_settings[chat_id][idx]
-        status = (
-            NOTIFY_EMOJI if s.get("notifications_enabled", True) else DISABLED_EMOJI
-        )
-        kb = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        f"🔹 Перейти на MEXC",
-                        url=f"https://www.mexc.com/ru-RU/futures/{s['symbol'][:-4]}_USDT",
-                    ),
-                    InlineKeyboardButton(
-                        f"Уведомления: {status}", callback_data=f"toggle_notify_{idx}"
-                    ),
-                ],
-                [InlineKeyboardButton("🔙 Назад", callback_data="list")],
-            ]
-        )
-        await q.edit_message_text(
-            f"<b>Настройки алерта:</b>\n\n"
-            f"<b>Пара:</b> {s['symbol']}\n"
-            f"<b>Таймфрейм:</b> {s['interval']}\n"
-            f"<b>Порог:</b> {s['threshold']:,} USDT",
-            parse_mode="HTML",
-            reply_markup=kb,
-        )
+        await show_alert_details_with_volumes(update, context, idx)
         return
 
     if data.startswith("toggle_notify_"):
@@ -609,3 +620,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
