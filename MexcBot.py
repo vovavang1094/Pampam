@@ -168,11 +168,16 @@ async def load_symbols():
                     if j.get("success") and j.get("data"):
                         ALL_SYMBOLS = {x["symbol"].replace("_USDT", "USDT") for x in j["data"] if "_USDT" in x["symbol"]}
                         logger.info(f"Загружено {len(ALL_SYMBOLS)} пар")
+                        # Добавляем основные пары на всякий случай
+                        ALL_SYMBOLS.update({"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT"})
+                        return True
                     else:
-                        ALL_SYMBOLS = {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
+                        ALL_SYMBOLS = {"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT"}
+                        return True
     except Exception as e:
         logger.error(f"Ошибка загрузки символов: {e}")
-        ALL_SYMBOLS = {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
+        ALL_SYMBOLS = {"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT"}
+        return False
 
 async def fetch_volume(symbol: str, interval: str) -> int:
     interval_map = {
@@ -203,8 +208,11 @@ async def fetch_volume(symbol: str, interval: str) -> int:
 # ====================== МОНИТОРИНГ ======================
 async def monitor_volumes(application: Application):
     await asyncio.sleep(10)
-    await load_symbols()
-    logger.info("Мониторинг объёмов запущен — работает 24/7")
+    loaded = await load_symbols()
+    if loaded:
+        logger.info(f"Мониторинг объёмов запущен. Загружено {len(ALL_SYMBOLS)} пар")
+    else:
+        logger.warning(f"Мониторинг объёмов запущен. Загружены только основные пары: {len(ALL_SYMBOLS)}")
 
     while True:
         try:
@@ -245,7 +253,13 @@ async def monitor_volumes(application: Application):
 # ====================== POST_INIT ======================
 async def post_init(application: Application):
     load_settings()  # Загружаем сохраненные настройки
-    await load_symbols()
+    # Загружаем символы сразу при старте
+    loaded = await load_symbols()
+    if loaded:
+        logger.info(f"Символы загружены при старте: {len(ALL_SYMBOLS)} пар")
+    else:
+        logger.warning(f"Используем только основные пары: {len(ALL_SYMBOLS)}")
+    
     # Запускаем мониторинг в фоновом режиме
     task = asyncio.create_task(monitor_volumes(application))
     # Сохраняем ссылку на задачу
@@ -295,9 +309,9 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_id = update.effective_chat.id
     user_settings.setdefault(chat_id, [])
-    text = (update.message.text or "").strip().lower()
+    text = (update.message.text or "").strip().upper()  # Делаем сразу uppercase
 
-    if not text or any(w in text for w in ["меню", "start", "привет", "/start"]):
+    if not text or any(w in text.lower() for w in ["меню", "start", "привет", "/start"]):
         await update.message.reply_text(
             "🔥 <b>MEXC Volume Tracker</b> 🔥\n\n"
             "📈 Отслеживание объемов в реальном времени\n"
@@ -311,11 +325,24 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state = user_state.get(chat_id)
     if state == "wait_symbol":
-        sym = text.upper()
+        sym = text
         if not sym.endswith("USDT"):
             sym += "USDT"
+        
+        # Проверяем в загруженных символах
         if sym not in ALL_SYMBOLS:
-            await update.message.reply_text(f"⚠️ Пара <b>{sym}</b> не найдена", parse_mode="HTML")
+            # Если символ не найден, показываем предупреждение, но позволяем добавить
+            await update.message.reply_text(
+                f"⚠️ Пара <b>{sym}</b> не найдена в основном списке.\n"
+                f"Это может быть новая пара или временная ошибка.\n"
+                f"Вы всё равно можете добавить алерт, но проверьте правильность тикера.\n\n"
+                f"Продолжить добавление?",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Да, продолжить", callback_data=f"force_add_{sym}")],
+                    [InlineKeyboardButton("❌ Нет, отменить", callback_data="back")]
+                ])
+            )
             return
         user_temp[chat_id] = {"symbol": sym}
         user_state[chat_id] = "wait_interval"
@@ -369,10 +396,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("Главное меню", reply_markup=main_menu())
         return
 
+    if data.startswith("force_add_"):
+        # Пользователь согласился добавить пару, даже если её нет в списке
+        sym = data.split("_")[2]
+        user_temp[chat_id] = {"symbol": sym}
+        user_state[chat_id] = "wait_interval"
+        await q.edit_message_text(f"✅ Пара: <b>{sym}</b>\nВыберите таймфрейм:", parse_mode="HTML", reply_markup=intervals_kb())
+        return
+
     if data == "add":
         user_state[chat_id] = "wait_symbol"
-        await q.edit_message_text("Введите тикер монеты (например: BTC, ETH, SOL):",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отмена", callback_data="back")]]))
+        await q.edit_message_text(
+            "Введите тикер монеты (например: BTC, ETH, SOL):\n\n"
+            "<i>Примечание: Бот автоматически добавит USDT в конец.</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отмена", callback_data="back")]])
+        )
         return
 
     if data == "list":
@@ -457,7 +496,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 web_app = FastAPI()
 @web_app.get("/")
 async def root():
-    return {"status": "MEXC Volume Bot работает 24/7", "time": time.strftime("%H:%M:%S"), "alerts_count": sum(len(v) for v in user_settings.values())}
+    return {
+        "status": "MEXC Volume Bot работает 24/7", 
+        "time": time.strftime("%H:%M:%S"), 
+        "alerts_count": sum(len(v) for v in user_settings.values()),
+        "symbols_loaded": len(ALL_SYMBOLS)
+    }
 
 @web_app.get("/health")
 async def health():
@@ -493,7 +537,7 @@ def run_bot():
         loop.run_until_complete(application.start())
         loop.run_until_complete(application.updater.start_polling())
         
-        logger.info("MEXC Volume Bot запущен и работает стабильно 24/7")
+        logger.info(f"MEXC Volume Bot запущен и работает стабильно 24/7")
         
         # Держим бота активным
         loop.run_forever()
@@ -501,7 +545,7 @@ def run_bot():
     except KeyboardInterrupt:
         logger.info("Бот остановлен пользователем")
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
+        logger.error(f"Критическая ошибка: {e}", exc_info=True)
     finally:
         # Сохраняем настройки при завершении
         save_settings()
@@ -531,6 +575,7 @@ if __name__ == "__main__":
     
     # Запускаем бота
     run_bot()
+
 
 
 
