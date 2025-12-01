@@ -5,6 +5,9 @@ import hashlib
 import logging
 import aiohttp
 import asyncio
+import json
+import uvicorn
+import threading
 from dotenv import load_dotenv
 from aiohttp import ClientTimeout
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -16,8 +19,6 @@ from telegram.ext import (
     filters,
 )
 from fastapi import FastAPI
-import uvicorn
-import threading
 
 # ====================== НАСТРОЙКИ ======================
 load_dotenv()
@@ -25,6 +26,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 ALLOWED_USER_ID = int(os.getenv("ALLOWED_USER_ID", "0"))
 MEXC_API_KEY = os.getenv("MEXC_API_KEY")
 MEXC_SECRET_KEY = os.getenv("MEXC_SECRET_KEY")
+SETTINGS_FILE = "user_settings.json"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,9 +41,58 @@ user_settings = {}
 user_state = {}
 user_temp = {}
 
-SHOW_INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"]
+SHOW_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "8h", "1d"]
 NOTIFY_EMOJI = "Активно"
 DISABLED_EMOJI = "Отключено"
+
+# ====================== СОХРАНЕНИЕ НАСТРОЕК ======================
+def save_settings():
+    try:
+        # Сохраняем только конфигурационные данные
+        data_to_save = {}
+        for chat_id, alerts in user_settings.items():
+            data_to_save[chat_id] = []
+            for alert in alerts:
+                # Копируем только конфигурационные поля
+                data_to_save[chat_id].append({
+                    'symbol': alert['symbol'],
+                    'interval': alert['interval'],
+                    'threshold': alert['threshold'],
+                    'notifications_enabled': alert['notifications_enabled']
+                })
+        
+        with open(SETTINGS_FILE, 'w') as f:
+            json.dump(data_to_save, f, indent=2)
+        logger.info("Настройки сохранены")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения настроек: {e}")
+
+def load_settings():
+    global user_settings
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r') as f:
+                data = json.load(f)
+                
+                # Преобразуем ключи обратно в int
+                user_settings = {}
+                for chat_id_str, alerts in data.items():
+                    chat_id = int(chat_id_str)
+                    user_settings[chat_id] = []
+                    for alert in alerts:
+                        # Добавляем отсутствующие поля
+                        user_settings[chat_id].append({
+                            'symbol': alert['symbol'],
+                            'interval': alert['interval'],
+                            'threshold': alert['threshold'],
+                            'last_notified': 0,
+                            'notifications_enabled': alert.get('notifications_enabled', True)
+                        })
+                
+            logger.info(f"Настройки загружены из {SETTINGS_FILE}")
+    except Exception as e:
+        logger.error(f"Ошибка загрузки настроек: {e}")
+        user_settings = {}
 
 # ====================== КЛАВИАТУРЫ ======================
 def main_menu():
@@ -141,7 +192,7 @@ async def fetch_volume(symbol: str, interval: str) -> int:
         logger.error(f"Ошибка получения объёма {symbol}: {e}")
     return 0
 
-# ====================== МОНИТОРИНГ (БЕЗОПАСНЫЙ) ======================
+# ====================== МОНИТОРИНГ ======================
 async def monitor_volumes(application: Application):
     await asyncio.sleep(10)
     await load_symbols()
@@ -153,14 +204,16 @@ async def monitor_volumes(application: Application):
                 for alert in alerts[:]:
                     try:
                         vol = await fetch_volume(alert["symbol"], alert["interval"])
-                        if (vol >= alert["threshold"]
-                            and vol > alert.get("last_notified", 0) + 1000
+                        # Основное условие: объём превышен и уведомления включены
+                        if (vol >= alert["threshold"] 
                             and alert.get("notifications_enabled", True)):
+                            
                             url = f"https://www.mexc.com/ru-RU/futures/{alert['symbol'][:-4]}_USDT"
                             kb = InlineKeyboardMarkup([[InlineKeyboardButton("Перейти на MEXC", url=url)]])
+                            
                             await application.bot.send_message(
                                 chat_id,
-                                f"<b>ВСПЛЕСК ОБЪЁМА!</b>\n\n"
+                                f"<b>🚨 ВСПЛЕСК ОБЪЁМА!</b>\n\n"
                                 f"<b>Пара:</b> {alert['symbol']}\n"
                                 f"<b>Таймфрейм:</b> {alert['interval']}\n"
                                 f"<b>Порог:</b> {alert['threshold']:,} USDT\n"
@@ -168,7 +221,9 @@ async def monitor_volumes(application: Application):
                                 parse_mode="HTML",
                                 reply_markup=kb
                             )
-                            alert["last_notified"] = vol
+                            
+                            # Обновляем время последнего уведомления
+                            alert["last_notified"] = time.time()
                     except Exception as e:
                         logger.error(f"Ошибка проверки алерта: {e}")
             await asyncio.sleep(30)
@@ -181,6 +236,7 @@ async def monitor_volumes(application: Application):
 
 # ====================== POST_INIT ======================
 async def post_init(application: Application):
+    load_settings()  # Загружаем сохраненные настройки
     await load_symbols()
     application.create_task(monitor_volumes(application))
 
@@ -284,6 +340,7 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg, parse_mode="HTML", reply_markup=main_menu())
         user_state.pop(chat_id, None)
         user_temp.pop(chat_id, None)
+        save_settings()  # Сохраняем изменения
         return
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -324,8 +381,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("del_"):
         idx = int(data.split("_")[1])
-        deleted = user_settings[chat_id].pop(idx)["symbol"]
-        await q.edit_message_text(f"✅ Алерт для {deleted} удалён", reply_markup=main_menu())
+        deleted = user_settings[chat_id].pop(idx)
+        await q.edit_message_text(f"✅ Алерт для {deleted['symbol']} удалён", reply_markup=main_menu())
+        save_settings()  # Сохраняем изменения
         return
 
     if data.startswith("alert_options_"):
@@ -338,6 +396,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         s = user_settings[chat_id][idx]
         s["notifications_enabled"] = not s.get("notifications_enabled", True)
         await show_alert_details_with_volumes(update, context, idx)
+        save_settings()  # Сохраняем изменения
         return
 
     if data.startswith("int_"):
@@ -373,6 +432,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(msg, parse_mode="HTML", reply_markup=main_menu())
         user_state.pop(chat_id, None)
         user_temp.pop(chat_id, None)
+        save_settings()  # Сохраняем изменения
         return
 
     if data == "vol_custom":
@@ -409,6 +469,7 @@ def run_bot():
 if __name__ == "__main__":
     threading.Thread(target=run_web_server, daemon=True).start()
     run_bot()
+
 
 
 
