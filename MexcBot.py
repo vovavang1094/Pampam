@@ -646,10 +646,27 @@ def main():
         drop_pending_updates=True,
         timeout=30,
     )
+    
+import os
+from threading import Thread
+import uvicorn
+from fastapi import FastAPI
 
+app = FastAPI()
+
+@app.get("/")
+async def root():
+    return {"status": "alive", "bot": "MEXC Volume Bot"}
+
+def run_web():
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
+# Запускаем веб-сервер в фоне
+Thread(target=run_web, daemon=True).start()
 
 if __name__ == "__main__":
     main()
+
 
 
 
