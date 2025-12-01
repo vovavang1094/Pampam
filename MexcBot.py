@@ -154,7 +154,6 @@ async def monitor_volumes(application: Application):
                     try:
                         vol = await fetch_volume(alert["symbol"], alert["interval"])
                         if (vol >= alert["threshold"]
-                                   # and vol > alert.get("last_notified", 0) + 1000
                             and alert.get("notifications_enabled", True)):
                             url = f"https://www.mexc.com/ru-RU/futures/{alert['symbol'][:-4]}_USDT"
                             kb = InlineKeyboardMarkup([[InlineKeyboardButton("Перейти на MEXC", url=url)]])
@@ -409,6 +408,7 @@ def run_bot():
 if __name__ == "__main__":
     threading.Thread(target=run_web_server, daemon=True).start()
     run_bot()
+
 
 
 
