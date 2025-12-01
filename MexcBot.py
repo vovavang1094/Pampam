@@ -6,6 +6,7 @@ import asyncio
 import time
 import json
 import os
+from dotenv import load_dotenv
 from aiohttp import ClientTimeout
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -707,6 +708,7 @@ if __name__ == "__main__":
     
     # Запустить основное приложение
     main()
+
 
 
 
