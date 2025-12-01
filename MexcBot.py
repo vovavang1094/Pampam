@@ -182,13 +182,14 @@ async def fetch_volume(symbol: str, interval: str) -> int:
         logging.error(f"Error fetching volume for {symbol}: {e}")
     return 0
 
-
 async def monitor_volumes(app):
     await asyncio.sleep(10)
     await load_symbols()
     logging.info("Volume monitoring started")
+
     while True:
         try:
+            # Основной цикл мониторинга
             for chat_id, sets in list(user_settings.items()):
                 for s in sets[:]:
                     try:
@@ -199,12 +200,10 @@ async def monitor_volumes(app):
                             and s.get("notifications_enabled", True)
                         ):
                             url = f"https://www.mexc.com/ru-RU/futures/{s['symbol'][:-4]}_USDT"
-                            kb = InlineKeyboardMarkup(
-                                [[InlineKeyboardButton("🔹 Перейти на MEXC", url=url)]]
-                            )
+                            kb = InlineKeyboardMarkup([[InlineKeyboardButton("Перейти на MEXC", url=url)]])
                             await app.bot.send_message(
                                 chat_id,
-                                f"<b>🚀 ВСПЛЕСК ОБЪЁМА!</b>\n\n"
+                                f"<b>ВСПЛЕСК ОБЪЁМА!</b>\n\n"
                                 f"<b>Пара:</b> {s['symbol']}\n"
                                 f"<b>Таймфрейм:</b> {s['interval']}\n"
                                 f"<b>Порог:</b> {s['threshold']:,} USDT\n"
@@ -214,10 +213,17 @@ async def monitor_volumes(app):
                             )
                             s["last_notified"] = vol
                     except Exception as e:
-                        logging.error(f"Monitoring error: {e}")
+                        logging.error(f"Error in alert check: {e}")
+
             await asyncio.sleep(30)
+
+        except (asyncio.CancelledError, GeneratorExit, RuntimeError):
+            logging.info("Monitoring task cancelled or event loop died – restarting in 10 sec...")
+            await asyncio.sleep(10)
+            continue  # перезапускаем цикл
+
         except Exception as e:
-            logging.error(f"Monitor loop error: {e}")
+            logging.error(f"Critical monitor error: {e}")
             await asyncio.sleep(60)
 
 
@@ -613,9 +619,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-async def post_init(app):
+async def post_init(application: Application) -> None:
     await load_symbols()
-    app.create_task(monitor_volumes(app))
+
+    application.create_task(
+        monitor_volumes(application),
+        update=None 
+    )
 
 
 def main():
@@ -623,10 +633,15 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, any_message))
     app.add_handler(CallbackQueryHandler(button_handler))
     print("🔥 MEXC Volume Bot с КРАСИВЫМИ КНОПКАМИ запущен! 🔥")
-    app.run_polling(drop_pending_updates=True)
+    app.run_polling(
+        drop_pending_updates=True,
+        timeout=30,
+        concurrent_updates=True,   # ← добавь эту строку
+    )
 
 
 if __name__ == "__main__":
     main()
+
 
 
