@@ -629,19 +629,28 @@ async def post_init(application: Application) -> None:
 
 
 def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, any_message))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    print("🔥 MEXC Volume Bot с КРАСИВЫМИ КНОПКАМИ запущен! 🔥")
-    app.run_polling(
+    application = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .post_init(post_init)
+        .concurrent_updates(True)
+        .build()
+    )
+
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, any_message))
+    application.add_handler(CallbackQueryHandler(button_handler))
+
+    print("MEXC Volume Bot запущен и работает 24/7")
+    
+    application.run_polling(
         drop_pending_updates=True,
         timeout=30,
-        concurrent_updates=True,   # ← добавь эту строку
     )
 
 
 if __name__ == "__main__":
     main()
+
 
 
 
