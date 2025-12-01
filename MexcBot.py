@@ -387,10 +387,13 @@ web_app = FastAPI()
 
 @web_app.get("/")
 async def root():
-    return {"status": "MEXC Volume Bot работает 24/7", "time": time.strftime("%H:%M:%S")}
+    print("UptimeRobot пинганул — ответил 200 OK")  # будет видно в логах Render
+    return {"status": "OK", "bot": "MEXC Volume Bot живой", "time": time.strftime("%H:%M:%S")}
 
 def run_web_server():
-    uvicorn.run(web_app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), log_level="error")
+    port = int(os.environ.get("PORT", 8000))
+    print(f"Веб-сервер успешно запущен на порту {port} — Render доволен!")
+    uvicorn.run(web_app, host="0.0.0.0", port=port, log_level="info")
 
 # ====================== ЗАПУСК ======================
 def run_bot():
@@ -409,8 +412,10 @@ def run_bot():
     application.run_polling(drop_pending_updates=True, timeout=30)
 
 if __name__ == "__main__":
-    threading.Thread(target=run_web_server, daemon=True).start()
+    threading.Thread(target=run_web_server, daemon=True).start()  
+    time.sleep(2)
     run_bot()
+
 
 
 
