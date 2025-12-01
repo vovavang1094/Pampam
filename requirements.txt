@@ -3,3 +3,6 @@ python-dotenv
 ccxt
 aiohttp
 aiolimiter
+fastapi
+uvicorn
+
