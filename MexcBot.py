@@ -1,4 +1,11 @@
-import hmac, hashlib, logging, aiohttp, asyncio, time
+import hmac
+import hashlib
+import logging
+import aiohttp
+import asyncio
+import time
+import json
+import os
 from aiohttp import ClientTimeout
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -7,14 +14,18 @@ from telegram.ext import (
     ContextTypes,
     MessageHandler,
     filters,
+    CommandHandler
 )
 
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("bot.log")
+    ]
 )
-
-import os
-from dotenv import load_dotenv
+logger = logging.getLogger()
 
 load_dotenv()
 
@@ -23,7 +34,7 @@ ALLOWED_USER_ID = int(os.getenv("ALLOWED_USER_ID", "0"))
 MEXC_API_KEY = os.getenv("MEXC_API_KEY")
 MEXC_SECRET_KEY = os.getenv("MEXC_SECRET_KEY")
 
-# Глобальные переменные
+# Глобальные переменные (создаются при запуске)
 ALL_SYMBOLS = set()
 user_settings = {}
 user_state = {}
@@ -36,7 +47,6 @@ ADD_INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "8h"]
 # Символы для статуса уведомлений
 NOTIFY_EMOJI = "✅"
 DISABLED_EMOJI = "❌"
-
 
 # ====================== ВИЗУАЛЬНЫЕ ЭЛЕМЕНТЫ ======================
 def main_menu():
@@ -124,23 +134,19 @@ async def load_symbols():
             ) as r:
                 if r.status == 200:
                     j = await r.json()
-                    ALL_SYMBOLS = {
-                        x["symbol"].replace("_USDT", "USDT")
-                        for x in j["data"]
-                        if "_USDT" in x["symbol"]
-                    }
-                    logging.info(f"Loaded {len(ALL_SYMBOLS)} symbols")
+                    if j.get("success") and j.get("data"):
+                        ALL_SYMBOLS = {
+                            x["symbol"].replace("_USDT", "USDT")
+                            for x in j["data"]
+                            if "_USDT" in x["symbol"]
+                        }
+                        logger.info(f"Loaded {len(ALL_SYMBOLS)} symbols")
+                    else:
+                        logger.warning("API returned non-success status")
+                        ALL_SYMBOLS = {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
     except Exception as e:
-        logging.error(f"Error loading symbols: {e}")
-        # Запасные символы
-        ALL_SYMBOLS = {
-            "BTCUSDT",
-            "ETHUSDT",
-            "SOLUSDT",
-            "DOGEUSDT",
-            "XRPUSDT",
-            "1000PEPEUSDT",
-        }
+        logger.error(f"Error loading symbols: {e}")
+        ALL_SYMBOLS = {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
 
 
 async def fetch_volume(symbol: str, interval: str) -> int:
@@ -176,16 +182,19 @@ async def fetch_volume(symbol: str, interval: str) -> int:
             ) as r:
                 if r.status == 200:
                     j = await r.json()
-                    if j.get("success") and j.get("data") and j["data"].get("amount"):
-                        return int(float(j["data"]["amount"][0]))
+                    if j.get("success") and j.get("data"):
+                        amounts = j["data"].get("amount")
+                        if isinstance(amounts, list) and amounts:
+                            return int(float(amounts[0]))
+                    logger.warning(f"Invalid response format for {symbol}")
     except Exception as e:
-        logging.error(f"Error fetching volume for {symbol}: {e}")
+        logger.error(f"Error fetching volume for {symbol}: {e}")
     return 0
 
+
 async def monitor_volumes(app):
-    await asyncio.sleep(10)
+    logger.info("Volume monitoring started")
     await load_symbols()
-    logging.info("Volume monitoring started")
 
     while True:
         try:
@@ -199,8 +208,11 @@ async def monitor_volumes(app):
                             and vol > s.get("last_notified", 0) + 1000
                             and s.get("notifications_enabled", True)
                         ):
-                            url = f"https://www.mexc.com/ru-RU/futures/{s['symbol'][:-4]}_USDT"
-                            kb = InlineKeyboardMarkup([[InlineKeyboardButton("Перейти на MEXC", url=url)]])
+                            asset = s['symbol'][:-4]  # Удалить USDT
+                            url = f"https://www.mexc.com/ru-RU/futures/{asset}_USDT"
+                            kb = InlineKeyboardMarkup(
+                                [[InlineKeyboardButton("Перейти на MEXC", url=url)]]
+                            )
                             await app.bot.send_message(
                                 chat_id,
                                 f"<b>ВСПЛЕСК ОБЪЁМА!</b>\n\n"
@@ -213,17 +225,15 @@ async def monitor_volumes(app):
                             )
                             s["last_notified"] = vol
                     except Exception as e:
-                        logging.error(f"Error in alert check: {e}")
+                        logger.error(f"Error in alert check: {e}")
 
             await asyncio.sleep(30)
 
-        except (asyncio.CancelledError, GeneratorExit, RuntimeError):
-            logging.info("Monitoring task cancelled or event loop died – restarting in 10 sec...")
-            await asyncio.sleep(10)
-            continue  # перезапускаем цикл
-
+        except asyncio.CancelledError:
+            logger.info("Monitoring task cancelled")
+            break
         except Exception as e:
-            logging.error(f"Critical monitor error: {e}")
+            logger.error(f"Critical monitor error: {e}")
             await asyncio.sleep(60)
 
 
@@ -266,10 +276,11 @@ async def show_volumes(update: Update, context: ContextTypes.DEFAULT_TYPE, symbo
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
 
     except Exception as e:
-        logging.error(f"Error showing volumes: {e}")
+        logger.error(f"Error showing volumes: {e}")
         await q.edit_message_text(
             "⚠️ Ошибка при загрузке данных. Попробуйте позже.", reply_markup=main_menu()
         )
+
 
 async def show_alert_details_with_volumes(update: Update, context: ContextTypes.DEFAULT_TYPE, idx: int):
     q = update.callback_query
@@ -298,23 +309,27 @@ async def show_alert_details_with_volumes(update: Update, context: ContextTypes.
     
     for tf in SHOW_INTERVALS:
         v = vols[tf]
-        emoji = "High" if v > 10_000_000 else "Medium" if v > 1_000_000 else "Low"
+        emoji = "🟢" if v > 10000000 else "🟡" if v > 1000000 else "🔴"
         text += f"{emoji} <code>{tf.rjust(3)}</code> → <b>{v:,} USDT</b>\n"
     
-    # ←←←←← ВЕРНУЛИ КНОПКУ ПЕРЕКЛЮЧЕНИЯ УВЕДОМЛЕНИЙ
-    kb = InlineKeyboardMarkup([
+    kb = InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("Перейти на MEXC", 
-                url=f"https://www.mexc.com/ru-RU/futures/{symbol[:-4]}_USDT"),
-            InlineKeyboardButton(
-                f"Уведомления: {status}",
-                callback_data=f"toggle_notify_{idx}"   # ← вот она!
-            ),
-        ],
-        [InlineKeyboardButton("Назад", callback_data="list")],
-    ])
+            [
+                InlineKeyboardButton(
+                    "Перейти на MEXC", 
+                    url=f"https://www.mexc.com/ru-RU/futures/{symbol[:-4]}_USDT"
+                ),
+                InlineKeyboardButton(
+                    f"Уведомления: {status}",
+                    callback_data=f"toggle_notify_{idx}"
+                ),
+            ],
+            [InlineKeyboardButton("Назад", callback_data="list")],
+        ]
+    )
     
     await q.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
 
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
@@ -367,10 +382,10 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             # Обработка ручного ввода порога
             raw_text = update.message.text.strip()
-            # Удаляем пробелы и буквы, оставляем только цифры
             threshold_value = int("".join(filter(str.isdigit, raw_text)))
             if threshold_value < 1000:
-                raise ValueError
+                await update.message.reply_text("⚠️ Минимальный порог 1000 USDT")
+                return
         except:
             await update.message.reply_text(
                 "⚠️ Введите число ≥ 1000 (например: 2000, 5000, 10000)"
@@ -386,17 +401,18 @@ async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             s = user_settings[chat_id][idx]
             s["threshold"] = threshold_value
             response_text = f"✅ Алерт обновлен!\n<b>{s['symbol']} {s['interval']}</b>\nПорог: {threshold_value:,} USDT"
+            logger.info(f"Alert updated: {s['symbol']} {s['interval']} ≥{threshold_value}")
         else:
-            user_settings[chat_id].append(
-                {
-                    "symbol": user_temp[chat_id]["symbol"],
-                    "interval": user_temp[chat_id]["interval"],
-                    "threshold": threshold_value,
-                    "last_notified": 0,
-                    "notifications_enabled": True,  # По умолчанию включены
-                }
-            )
+            alert_data = {
+                "symbol": user_temp[chat_id]["symbol"],
+                "interval": user_temp[chat_id]["interval"],
+                "threshold": threshold_value,
+                "last_notified": 0,
+                "notifications_enabled": True,
+            }
+            user_settings[chat_id].append(alert_data)
             response_text = f"✅ Алерт добавлен!\n<b>{user_temp[chat_id]['symbol']} {user_temp[chat_id]['interval']}</b>\nПорог: {threshold_value:,} USDT"
+            logger.info(f"Alert added: {alert_data}")
 
         await update.message.reply_text(
             response_text, parse_mode="HTML", reply_markup=main_menu()
@@ -478,6 +494,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(
             f"✅ Алерт для {symbol} удален", reply_markup=main_menu()
         )
+        logger.info(f"Alert deleted: {symbol}")
         return
 
     if data.startswith("showvol_"):
@@ -513,35 +530,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("toggle_notify_"):
         idx = int(data.split("_")[2])
         s = user_settings[chat_id][idx]
-        s["notifications_enabled"] = not s.get("notifications_enabled", True)
+        current_state = s.get("notifications_enabled", True)
+        s["notifications_enabled"] = not current_state
         new_status = NOTIFY_EMOJI if s["notifications_enabled"] else DISABLED_EMOJI
+        status_text = "включены" if s["notifications_enabled"] else "выключены"
         await q.answer(
-            f"Уведомления {'включены' if s['notifications_enabled'] else 'выключены'}",
+            f"Уведомления {status_text}",
             show_alert=True,
         )
-        # Show updated options
-        await q.edit_message_text(
-            f"<b>Настройки алерта:</b>\n\n"
-            f"<b>Пара:</b> {s['symbol']}\n"
-            f"<b>Таймфрейм:</b> {s['interval']}\n"
-            f"<b>Порог:</b> {s['threshold']:,} USDT",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            f"🔹 Перейти на MEXC",
-                            url=f"https://www.mexc.com/ru-RU/futures/{s['symbol'][:-4]}_USDT",
-                        ),
-                        InlineKeyboardButton(
-                            f"Уведомления: {new_status}",
-                            callback_data=f"toggle_notify_{idx}",
-                        ),
-                    ],
-                    [InlineKeyboardButton("🔙 Назад", callback_data="list")],
-                ]
-            ),
-        )
+        logger.info(f"Notifications toggled for {s['symbol']}: {status_text}")
+        
+        # Обновляем сообщение
+        if idx < len(user_settings[chat_id]):
+            await show_alert_details_with_volumes(update, context, idx)
+        else:
+            await q.edit_message_text(
+                "⚠️ Ошибка при обновлении", reply_markup=main_menu()
+            )
         return
 
     if data.startswith("int_"):
@@ -578,16 +583,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="HTML",
                     reply_markup=main_menu(),
                 )
+                logger.info(f"Alert updated: {s['symbol']} {s['interval']} ≥{volume}")
             else:
-                user_settings[chat_id].append(
-                    {
-                        "symbol": user_temp[chat_id]["symbol"],
-                        "interval": user_temp[chat_id]["interval"],
-                        "threshold": volume,
-                        "last_notified": 0,
-                        "notifications_enabled": True,
-                    }
-                )
+                alert_data = {
+                    "symbol": user_temp[chat_id]["symbol"],
+                    "interval": user_temp[chat_id]["interval"],
+                    "threshold": volume,
+                    "last_notified": 0,
+                    "notifications_enabled": True,
+                }
+                user_settings[chat_id].append(alert_data)
                 await q.edit_message_text(
                     f"✅ Алерт добавлен!\n"
                     f"<b>{user_temp[chat_id]['symbol']} {user_temp[chat_id]['interval']}</b>\n"
@@ -595,12 +600,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="HTML",
                     reply_markup=main_menu(),
                 )
+                logger.info(f"Alert added: {alert_data}")
 
             # Сброс состояния
             user_state.pop(chat_id, None)
             user_temp.pop(chat_id, None)
         except Exception as e:
-            logging.error(f"Error processing volume button: {e}")
+            logger.error(f"Error processing volume button: {e}")
             await q.answer("Произошла ошибка при обработке", show_alert=True)
         return
 
@@ -620,15 +626,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def post_init(application: Application) -> None:
-    await load_symbols()
+    try:
+        await load_symbols()
+        logger.info("Symbols loaded successfully")
+    except Exception as e:
+        logger.error(f"Error loading symbols on startup: {e}")
 
-    application.create_task(
-        monitor_volumes(application),
-        update=None 
-    )
+
+async def start_bot(application: Application):
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    
+    # Создаем задачу мониторинга
+    monitoring_task = asyncio.create_task(monitor_volumes(application))
+    
+    # Ждем завершения или отмены
+    try:
+        while True:
+            await asyncio.sleep(3600)  # Проверяем каждые час
+    except asyncio.CancelledError:
+        logger.info("Shutting down monitoring")
+        monitoring_task.cancel()
+        await monitoring_task
+        await application.updater.stop()
+        await application.stop()
+        await application.shutdown()
 
 
 def main():
+    # Создаем приложение Telegram
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -637,35 +664,51 @@ def main():
         .build()
     )
 
+    # Регистрируем обработчики
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, any_message))
     application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(CommandHandler("start", any_message))
 
-    print("MEXC Volume Bot запущен и работает 24/7")
-    
-    application.run_polling(
-        drop_pending_updates=True,
-        timeout=30,
-    )
-    
-import os
-from threading import Thread
-import uvicorn
+    # Запускаем бота
+    logger.info("MEXC Volume Bot запущен")
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(start_bot(application))
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by keyboard interrupt")
+    except Exception as e:
+        logger.error(f"Critical error: {e}")
+    finally:
+        logger.info("MEXC Volume Bot остановлен")
+
+
+# Веб-сервер для Render.com
 from fastapi import FastAPI
+import uvicorn
 
 app = FastAPI()
 
 @app.get("/")
-async def root():
-    return {"status": "alive", "bot": "MEXC Volume Bot"}
-
-def run_web():
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
-# Запускаем веб-сервер в фоне
-Thread(target=run_web, daemon=True).start()
+def health_check():
+    return {"status": "running", "service": "MEXC Volume Bot"}
 
 if __name__ == "__main__":
+    # Запустить веб-сервер в отдельном процессе
+    import threading
+    web_thread = threading.Thread(
+        target=lambda: uvicorn.run(
+            app, 
+            host="0.0.0.0", 
+            port=int(os.environ.get("PORT", 8080))
+        ),
+        daemon=True
+    )
+    web_thread.start()
+    
+    # Запустить основное приложение
     main()
+
+
 
 
 
