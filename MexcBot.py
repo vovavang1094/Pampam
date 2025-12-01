@@ -26,7 +26,9 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 ALLOWED_USER_ID = int(os.getenv("ALLOWED_USER_ID", "0"))
 MEXC_API_KEY = os.getenv("MEXC_API_KEY")
 MEXC_SECRET_KEY = os.getenv("MEXC_SECRET_KEY")
-SETTINGS_FILE = "user_settings.json"
+
+# Используем /tmp на Render для сохранения файлов
+SETTINGS_FILE = "/tmp/user_settings.json"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,6 +92,11 @@ def load_settings():
                         })
                 
             logger.info(f"Настройки загружены из {SETTINGS_FILE}")
+        else:
+            logger.info(f"Файл настроек не найден, создаю новый")
+            user_settings = {}
+            # Создаем пустой файл
+            save_settings()
     except Exception as e:
         logger.error(f"Ошибка загрузки настроек: {e}")
         user_settings = {}
@@ -227,18 +234,21 @@ async def monitor_volumes(application: Application):
                     except Exception as e:
                         logger.error(f"Ошибка проверки алерта: {e}")
             await asyncio.sleep(30)
-        except (asyncio.CancelledError, GeneratorExit):
-            logger.info("Мониторинг временно остановлен — перезапуск через 10 сек...")
-            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            logger.info("Мониторинг остановлен")
+            break
         except Exception as e:
-            logger.error(f"Критическая ошибка мониторинга: {e}")
+            logger.error(f"Ошибка мониторинга: {e}")
             await asyncio.sleep(60)
 
 # ====================== POST_INIT ======================
 async def post_init(application: Application):
     load_settings()  # Загружаем сохраненные настройки
     await load_symbols()
-    application.create_task(monitor_volumes(application))
+    # Запускаем мониторинг в фоновом режиме
+    task = asyncio.create_task(monitor_volumes(application))
+    # Сохраняем ссылку на задачу
+    application.monitor_task = task
 
 # ====================== ДЕТАЛИ АЛЕРТА С ОБЪЁМАМИ ======================
 async def show_alert_details_with_volumes(update: Update, context: ContextTypes.DEFAULT_TYPE, idx: int):
@@ -446,12 +456,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 web_app = FastAPI()
 @web_app.get("/")
 async def root():
-    return {"status": "MEXC Volume Bot работает 24/7", "time": time.strftime("%H:%M:%S")}
+    return {"status": "MEXC Volume Bot работает 24/7", "time": time.strftime("%H:%M:%S"), "alerts_count": sum(len(v) for v in user_settings.values())}
+
+@web_app.get("/health")
+async def health():
+    return {"status": "healthy", "timestamp": time.time()}
+
 def run_web_server():
     uvicorn.run(web_app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), log_level="error")
 
+# ====================== ГРАЦИОЗНОЕ ЗАВЕРШЕНИЕ ======================
+def signal_handler(signum, frame):
+    logger.info("Получен сигнал завершения...")
+    save_settings()
+    logger.info("Настройки сохранены перед завершением")
+    os._exit(0)
+
 # ====================== ЗАПУСК ======================
 def run_bot():
+    # Регистрируем обработчик сигналов
+    import signal
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -464,11 +491,36 @@ def run_bot():
     application.add_handler(CallbackQueryHandler(button_handler))
 
     logger.info("MEXC Volume Bot запущен и работает стабильно 24/7")
-    application.run_polling(drop_pending_updates=True, timeout=30)
+    
+    try:
+        application.run_polling(
+            drop_pending_updates=True, 
+            timeout=30,
+            close_loop=False  # Не закрывать event loop
+        )
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен пользователем")
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}")
+    finally:
+        # Сохраняем настройки при завершении
+        save_settings()
+        logger.info("Настройки сохранены")
 
 if __name__ == "__main__":
-    threading.Thread(target=run_web_server, daemon=True).start()
+    # Сначала загружаем настройки
+    load_settings()
+    
+    # Запускаем веб-сервер в отдельном потоке
+    web_thread = threading.Thread(target=run_web_server, daemon=True)
+    web_thread.start()
+    
+    # Даем веб-серверу время запуститься
+    time.sleep(2)
+    
+    # Запускаем бота
     run_bot()
+
 
 
 
