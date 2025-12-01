@@ -8,6 +8,7 @@ import asyncio
 import json
 import uvicorn
 import threading
+import signal
 from dotenv import load_dotenv
 from aiohttp import ClientTimeout
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -60,7 +61,7 @@ def save_settings():
                     'symbol': alert['symbol'],
                     'interval': alert['interval'],
                     'threshold': alert['threshold'],
-                    'notifications_enabled': alert['notifications_enabled']
+                    'notifications_enabled': alert.get('notifications_enabled', True)
                 })
         
         with open(SETTINGS_FILE, 'w') as f:
@@ -465,20 +466,13 @@ async def health():
 def run_web_server():
     uvicorn.run(web_app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), log_level="error")
 
-# ====================== ГРАЦИОЗНОЕ ЗАВЕРШЕНИЕ ======================
-def signal_handler(signum, frame):
-    logger.info("Получен сигнал завершения...")
-    save_settings()
-    logger.info("Настройки сохранены перед завершением")
-    os._exit(0)
-
-# ====================== ЗАПУСК ======================
+# ====================== ЗАПУСК БОТА ======================
 def run_bot():
-    # Регистрируем обработчик сигналов
-    import signal
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
+    # Создаем новую event loop для основного потока
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     
+    # Создаем application
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -487,17 +481,23 @@ def run_bot():
         .build()
     )
 
+    # Добавляем обработчики
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, any_message))
     application.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("MEXC Volume Bot запущен и работает стабильно 24/7")
+    logger.info("MEXC Volume Bot запускается...")
     
     try:
-        application.run_polling(
-            drop_pending_updates=True, 
-            timeout=30,
-            close_loop=False  # Не закрывать event loop
-        )
+        # Запускаем polling в event loop
+        loop.run_until_complete(application.initialize())
+        loop.run_until_complete(application.start())
+        loop.run_until_complete(application.updater.start_polling())
+        
+        logger.info("MEXC Volume Bot запущен и работает стабильно 24/7")
+        
+        # Держим бота активным
+        loop.run_forever()
+        
     except KeyboardInterrupt:
         logger.info("Бот остановлен пользователем")
     except Exception as e:
@@ -506,9 +506,20 @@ def run_bot():
         # Сохраняем настройки при завершении
         save_settings()
         logger.info("Настройки сохранены")
+        
+        # Корректно останавливаем бота
+        try:
+            loop.run_until_complete(application.stop())
+            loop.run_until_complete(application.shutdown())
+        except:
+            pass
+            
+        # Закрываем event loop
+        loop.close()
 
+# ====================== ГЛАВНАЯ ФУНКЦИЯ ======================
 if __name__ == "__main__":
-    # Сначала загружаем настройки
+    # Загружаем настройки
     load_settings()
     
     # Запускаем веб-сервер в отдельном потоке
