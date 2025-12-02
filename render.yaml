@@ -1,12 +1,29 @@
-YAML
 services:
   - type: web
-    name: mexcbot
+    name: mexc-volume-bot
     env: python
-    runtime: python3.12.7
+    region: frankfurt  # или singapore для Азии
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: python MexcBot.py
+    envVars:
+      - key: PORT
+        value: 8000
+      # Эти переменные нужно будет задать в Dashboard Render
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: ALLOWED_USER_ID
+        sync: false
+      - key: MEXC_API_KEY
+        sync: false
+      - key: MEXC_SECRET_KEY
+        sync: false
+    healthCheckPath: /health
+    autoDeploy: true
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python MexcBot.py  
-    autoDeploy: true
+    disk:
+      name: alerts-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
 
-    autoDeploy: true
