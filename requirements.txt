@@ -1,10 +1,30 @@
-python-telegram-bot==20.8
-python-dotenv
-ccxt
-aiohttp
-aiolimiter
-python-dotenv
-fastapi
-uvicorn
+services:
+  - type: web
+    name: mexc-volume-bot
+    env: python
+    region: frankfurt  # или singapore для Азии
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: python MexcBot.py
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: ALLOWED_USER_ID
+        sync: false
+      - key: MEXC_API_KEY
+        sync: false
+      - key: MEXC_SECRET_KEY
+        sync: false
+    healthCheckPath: /health
+    autoDeploy: true
+    plan: free
+    disk:
+      name: alerts-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+
 
 
