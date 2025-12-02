@@ -61,11 +61,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Отключаем логирование от библиотек (уменьшаем шум)
+# Отключаем логирование от библиотек
 logging.getLogger('telegram').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
-logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 # Глобальные переменные
 ALL_SYMBOLS = set()
@@ -88,7 +87,7 @@ _last_status_notification = 0
 # ====================== РЕЙТ ЛИМИТЕР ДЛЯ TELEGRAM ======================
 class TelegramRateLimiter:
     """Лимитер запросов к Telegram API"""
-    def __init__(self, max_per_second=0.5):  # 1 запрос в 2 секунды
+    def __init__(self, max_per_second=0.5):
         self.max_per_second = max_per_second
         self.last_call = 0
         
@@ -115,7 +114,6 @@ class TelegramRateLimiter:
                     return await self.call(coro)
             raise
 
-# Создаем глобальный лимитер
 telegram_limiter = TelegramRateLimiter(max_per_second=0.5)
 
 # ====================== СОХРАНЕНИЕ ДАННЫХ ======================
@@ -125,9 +123,9 @@ def save_settings():
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump({str(k): v for k, v in user_settings.items()}, f, 
                      ensure_ascii=False, indent=2, default=str)
-        logger.debug(f"Настройки сохранены в {DATA_FILE}")
+        logger.debug("Настройки сохранены")
     except Exception as e:
-        logger.error(f"Ошибка сохранения настроек: {e}")
+        logger.error(f"Ошибка сохранения: {e}")
 
 def load_settings():
     """Загрузить настройки из файла"""
@@ -141,9 +139,8 @@ def load_settings():
             logger.info(f"Загружено {total_alerts} алертов")
         else:
             user_settings = {}
-            logger.info("Файл с настройками не найден")
     except Exception as e:
-        logger.error(f"Ошибка загрузки настроек: {e}")
+        logger.error(f"Ошибка загрузки: {e}")
         user_settings = {}
 
 # ====================== УПРОЩЕННЫЙ HEARTBEAT ======================
@@ -156,7 +153,7 @@ async def simple_heartbeat():
         try:
             heartbeat_count += 1
             
-            # Только раз в 10 минут логируем
+            # Логирование каждые 10 минут
             if heartbeat_count % 10 == 0:
                 try:
                     memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
@@ -169,10 +166,9 @@ async def simple_heartbeat():
             if heartbeat_count % 30 == 0:
                 save_settings()
             
-            await asyncio.sleep(60)  # Только 60 секунд!
+            await asyncio.sleep(60)
             
         except asyncio.CancelledError:
-            logger.info("Heartbeat остановлен")
             break
         except Exception as e:
             logger.error(f"Heartbeat error: {e}")
@@ -183,14 +179,13 @@ async def status_notifications(application: Application):
     """Отправка статусных уведомлений каждые 2 часа"""
     global _last_status_notification
     
-    logger.info("📅 Система статусных уведомлений запущена")
+    logger.info("📅 Статусные уведомления запущены")
     
     while True:
         try:
             current_time = time.time()
             
-            # Проверяем, прошло ли 2 часа (7200 секунд)
-            if current_time - _last_status_notification >= 7200:
+            if current_time - _last_status_notification >= 7200:  # 2 часа
                 try:
                     total_alerts = sum(len(alerts) for alerts in user_settings.values())
                     uptime_seconds = int(current_time - _start_time)
@@ -216,7 +211,7 @@ async def status_notifications(application: Application):
                     )
                     
                     _last_status_notification = current_time
-                    logger.info(f"Статусное уведомление отправлено")
+                    logger.info("Статусное уведомление отправлено")
                     
                 except Exception as e:
                     logger.error(f"Ошибка отправки статуса: {e}")
@@ -233,8 +228,10 @@ async def status_notifications(application: Application):
 def main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Добавить алерт", callback_data="add")],
+        [InlineKeyboardButton("➕➕ Добавить несколько монет", callback_data="add_multiple")],
         [InlineKeyboardButton("📋 Мои алерты", callback_data="list")],
         [InlineKeyboardButton("❌ Удалить алерт", callback_data="delete")],
+        [InlineKeyboardButton("🔄 Обновить пары", callback_data="refresh_symbols")],
         [InlineKeyboardButton("📊 Статус", callback_data="status")],
     ])
 
@@ -268,6 +265,10 @@ def volume_kb():
             InlineKeyboardButton("10000", callback_data="volbtn_10000"),
         ],
         [
+            InlineKeyboardButton("20000", callback_data="volbtn_20000"),
+            InlineKeyboardButton("50000", callback_data="volbtn_50000"),
+        ],
+        [
             InlineKeyboardButton("✏️ Вручную", callback_data="vol_custom"),
             InlineKeyboardButton("🔙 Назад", callback_data="back"),
         ],
@@ -276,14 +277,19 @@ def volume_kb():
 def list_kb(chat_id):
     sets = user_settings.get(chat_id, [])
     kb = []
-    for i, s in enumerate(sets[:10]):  # Ограничиваем 10 алертами
+    for i, s in enumerate(sets[:15]):  # Ограничиваем 15 алертами
         status = NOTIFY_EMOJI if s.get("notifications_enabled", True) else DISABLED_EMOJI
-        kb.append([InlineKeyboardButton(
-            f"{i+1}. {s['symbol']} {s['interval']} ≥{s['threshold']:,} {status}",
-            callback_data=f"alert_options_{i}"
-        )])
-    if len(sets) > 10:
-        kb.append([InlineKeyboardButton(f"... и еще {len(sets)-10} алертов", callback_data="list")])
+        text = f"{i+1}. {s['symbol']} {s['interval']} ≥{s['threshold']:,} {status}"
+        if len(text) > 60:  # Обрезаем если слишком длинно
+            text = text[:57] + "..."
+        kb.append([InlineKeyboardButton(text, callback_data=f"alert_options_{i}")])
+    
+    if len(sets) > 15:
+        kb.append([InlineKeyboardButton(f"... и еще {len(sets)-15} алертов", callback_data="list")])
+    
+    if sets:
+        kb.append([InlineKeyboardButton("🔄 Обновить все", callback_data="refresh_all")])
+    
     kb.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
     return InlineKeyboardMarkup(kb)
 
@@ -307,7 +313,10 @@ async def load_symbols():
     
     # Fallback
     if len(ALL_SYMBOLS) < 50:
-        ALL_SYMBOLS = {"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT"}
+        ALL_SYMBOLS = {
+            "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT", 
+            "XRPUSDT", "DOGEUSDT", "DOTUSDT", "AVAXUSDT", "LINKUSDT"
+        }
         logger.info(f"Используется fallback список: {len(ALL_SYMBOLS)} пар")
     
     return False
@@ -360,7 +369,7 @@ async def safe_monitor_volumes(application: Application):
                 if not alerts:
                     continue
                     
-                for alert in alerts[:20]:  # Ограничиваем 20 алертов на пользователя
+                for alert in alerts[:50]:  # Ограничиваем 50 алертов на пользователя
                     if not alert.get("notifications_enabled", True):
                         continue
                     
@@ -378,7 +387,8 @@ async def safe_monitor_volumes(application: Application):
                                 f"<b>Пара:</b> {alert['symbol']}\n"
                                 f"<b>Таймфрейм:</b> {alert['interval']}\n"
                                 f"<b>Порог:</b> {threshold:,} USDT\n"
-                                f"<b>Текущий объем:</b> {vol:,} USDT"
+                                f"<b>Текущий объем:</b> {vol:,} USDT\n"
+                                f"<b>Превышение:</b> {(vol - threshold):,} USDT"
                             )
                             
                             url = f"https://www.mexc.com/ru-RU/futures/{alert['symbol'][:-4]}_USDT"
@@ -403,7 +413,7 @@ async def safe_monitor_volumes(application: Application):
                 save_settings()
             
             error_count = 0
-            await asyncio.sleep(30)  # Проверяем каждые 30 секунд
+            await asyncio.sleep(30)
             
         except asyncio.CancelledError:
             logger.info("Мониторинг остановлен")
@@ -413,7 +423,7 @@ async def safe_monitor_volumes(application: Application):
             logger.error(f"Ошибка мониторинга ({error_count}): {e}")
             
             if error_count >= 3:
-                await asyncio.sleep(300)  # 5 минут при ошибках
+                await asyncio.sleep(300)
                 error_count = 0
             else:
                 await asyncio.sleep(60)
@@ -445,14 +455,14 @@ async def show_alert_simple(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         f"<b>Таймфрейм:</b> {alert['interval']}\n"
         f"<b>Порог:</b> {alert['threshold']:,} USDT\n"
         f"<b>Уведомления:</b> {status}\n\n"
-        f"<i>Загружаю текущие объемы...</i>"
+        f"<i>Загружаю текущий объем...</i>"
     )
     
     await telegram_limiter.call(
         q.edit_message_text(text, parse_mode="HTML")
     )
     
-    # Загружаем объемы асинхронно
+    # Загружаем объем асинхронно
     try:
         vol = await fetch_volume(symbol, alert["interval"])
         
@@ -478,8 +488,12 @@ async def show_alert_simple(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     
     kb = InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("📈 MEXC", url=f"https://www.mexc.com/ru-RU/futures/{symbol[:-4]}_USDT"),
             InlineKeyboardButton(f"{'🔔' if alert.get('notifications_enabled', True) else '🔕'} Увед.", 
-                               callback_data=f"toggle_notify_{idx}"),
+                               callback_data=f"toggle_notify_{idx}")
+        ],
+        [
+            InlineKeyboardButton("✏️ Изменить", callback_data=f"edit_{idx}"),
             InlineKeyboardButton("🗑 Удалить", callback_data=f"del_{idx}")
         ],
         [InlineKeyboardButton("🔙 Назад", callback_data="list")],
@@ -487,6 +501,57 @@ async def show_alert_simple(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     
     await telegram_limiter.call(
         q.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+    )
+
+# ====================== ДОБАВЛЕНИЕ НЕСКОЛЬКИХ МОНЕТ ======================
+async def add_multiple_coins(update: Update, context: ContextTypes.DEFAULT_TYPE, symbols_text: str):
+    """Добавление нескольких монет"""
+    chat_id = update.effective_chat.id
+    
+    # Парсим символы
+    symbols_list = []
+    invalid_symbols = []
+    
+    for sym in symbols_text.upper().replace(',', ' ').replace('\n', ' ').split():
+        sym = sym.strip()
+        if not sym:
+            continue
+            
+        if not sym.endswith("USDT"):
+            sym += "USDT"
+            
+        if sym in ALL_SYMBOLS:
+            symbols_list.append(sym)
+        else:
+            invalid_symbols.append(sym)
+    
+    if not symbols_list:
+        await telegram_limiter.call(
+            update.message.reply_text("❌ Не найдено валидных пар", reply_markup=main_menu())
+        )
+        return
+    
+    # Сохраняем символы
+    user_temp[chat_id] = {"symbols": symbols_list}
+    user_state[chat_id] = "wait_multiple_interval"
+    
+    # Показываем результат
+    valid_count = len(symbols_list)
+    invalid_count = len(invalid_symbols)
+    
+    message = f"✅ Найдено пар: <b>{valid_count}</b>\n"
+    if invalid_count > 0:
+        message += f"❌ Пропущено: <b>{invalid_count}</b>\n"
+    
+    if valid_count <= 10:
+        message += f"<code>{', '.join(symbols_list)}</code>\n\n"
+    else:
+        message += f"<code>{', '.join(symbols_list[:10])}...</code>\n\n"
+    
+    message += "Выберите таймфрейм для всех пар:"
+    
+    await telegram_limiter.call(
+        update.message.reply_text(message, parse_mode="HTML", reply_markup=intervals_kb())
     )
 
 # ====================== ОБРАБОТЧИКИ ======================
@@ -504,7 +569,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 <b>Пар:</b> {len(ALL_SYMBOLS)}\n"
         f"🔔 <b>Ваших алертов:</b> {user_alerts}\n"
         f"👥 <b>Всего алертов:</b> {total_alerts}\n\n"
-        f"<i>Статусные уведомления каждые 2 часа</i>"
+        f"<b>Функции:</b>\n"
+        f"• Отслеживание объемов 24/7\n"
+        f"• Добавление одной или нескольких монет\n"
+        f"• Статусные уведомления каждые 2 часа\n"
+        f"• Надежное сохранение настроек\n\n"
+        f"<i>Выберите действие:</i>"
     )
     
     await telegram_limiter.call(
@@ -514,8 +584,157 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
         return
+
+    chat_id = update.effective_chat.id
+    user_settings.setdefault(chat_id, [])
+    text = (update.message.text or "").strip()
+
+    if not text or any(w in text.lower() for w in ["меню", "start", "привет", "/start"]):
+        await start_command(update, context)
+        return
+
+    state = user_state.get(chat_id)
     
-    await start_command(update, context)
+    if state == "wait_symbol":
+        await add_single_coin(update, context, text)
+        return
+    
+    elif state == "wait_multiple_symbols":
+        await add_multiple_coins(update, context, text)
+        return
+    
+    elif state in ["wait_threshold", "wait_threshold_custom", "edit_threshold", "edit_threshold_custom"]:
+        await process_threshold(update, context, text)
+        return
+
+async def add_single_coin(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    """Добавление одной монеты"""
+    chat_id = update.effective_chat.id
+    sym = text.upper().strip()
+    
+    if not sym.endswith("USDT"):
+        sym += "USDT"
+    
+    if sym not in ALL_SYMBOLS:
+        # Поиск похожих пар
+        suggestions = [s for s in ALL_SYMBOLS if sym[:-4].lower() in s.lower()][:5]
+        suggestions_text = "\n".join(suggestions) if suggestions else "Нет похожих пар"
+        
+        await telegram_limiter.call(
+            update.message.reply_text(
+                f"⚠️ Пара <b>{sym}</b> не найдена\n\n"
+                f"<b>Похожие пары:</b>\n{suggestions_text}",
+                parse_mode="HTML",
+                reply_markup=main_menu()
+            )
+        )
+        return
+    
+    user_temp[chat_id] = {"symbol": sym}
+    user_state[chat_id] = "wait_interval"
+    
+    await telegram_limiter.call(
+        update.message.reply_text(
+            f"✅ Пара: <b>{sym}</b>\nВыберите таймфрейм:",
+            parse_mode="HTML",
+            reply_markup=intervals_kb()
+        )
+    )
+
+async def process_threshold(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    """Обработка порога"""
+    chat_id = update.effective_chat.id
+    
+    try:
+        numbers = re.findall(r'\d+', text.replace(',', '').replace(' ', ''))
+        if not numbers:
+            raise ValueError
+        
+        threshold_value = int(numbers[0])
+        if threshold_value < 1000:
+            await telegram_limiter.call(
+                update.message.reply_text("⚠️ Минимум 1000 USDT")
+            )
+            return
+    except:
+        await telegram_limiter.call(
+            update.message.reply_text("⚠️ Введите число ≥ 1000")
+        )
+        return
+    
+    is_edit = user_state[chat_id] in ["edit_threshold", "edit_threshold_custom"]
+    
+    if "symbols" in user_temp.get(chat_id, {}):
+        # Добавление нескольких алертов
+        symbols = user_temp[chat_id]["symbols"]
+        interval = user_temp[chat_id]["interval"]
+        added_count = 0
+        
+        for sym in symbols:
+            # Проверяем дубликаты
+            existing = False
+            for alert in user_settings.get(chat_id, []):
+                if alert["symbol"] == sym and alert["interval"] == interval:
+                    existing = True
+                    break
+            
+            if not existing:
+                alert = {
+                    "symbol": sym,
+                    "interval": interval,
+                    "threshold": threshold_value,
+                    "last_notified": 0,
+                    "notifications_enabled": True,
+                }
+                user_settings[chat_id].append(alert)
+                added_count += 1
+        
+        save_settings()
+        
+        message = (
+            f"✅ Добавлено <b>{added_count}</b> алертов!\n\n"
+            f"<b>Таймфрейм:</b> {interval}\n"
+            f"<b>Порог:</b> {threshold_value:,} USDT\n"
+            f"<b>Всего алертов:</b> {len(user_settings[chat_id])}"
+        )
+        
+    elif is_edit:
+        # Редактирование
+        idx = user_temp[chat_id]["edit_idx"]
+        user_settings[chat_id][idx]["threshold"] = threshold_value
+        save_settings()
+        
+        alert = user_settings[chat_id][idx]
+        message = (
+            f"✅ Алерт обновлён!\n\n"
+            f"<b>{alert['symbol']} {alert['interval']}</b>\n"
+            f"<b>Порог:</b> {threshold_value:,} USDT"
+        )
+    else:
+        # Один алерт
+        alert = {
+            "symbol": user_temp[chat_id]["symbol"],
+            "interval": user_temp[chat_id]["interval"],
+            "threshold": threshold_value,
+            "last_notified": 0,
+            "notifications_enabled": True,
+        }
+        user_settings[chat_id].append(alert)
+        save_settings()
+        
+        message = (
+            f"✅ Алерт добавлен!\n\n"
+            f"<b>{alert['symbol']} {alert['interval']}</b>\n"
+            f"<b>Порог:</b> {threshold_value:,} USDT\n"
+            f"<b>Всего алертов:</b> {len(user_settings[chat_id])}"
+        )
+    
+    await telegram_limiter.call(
+        update.message.reply_text(message, parse_mode="HTML", reply_markup=main_menu())
+    )
+    
+    user_state.pop(chat_id, None)
+    user_temp.pop(chat_id, None)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -546,6 +765,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    elif data == "add_multiple":
+        user_state[chat_id] = "wait_multiple_symbols"
+        user_temp[chat_id] = {}
+        await telegram_limiter.call(
+            q.edit_message_text(
+                "Введите несколько тикеров через пробел или запятую:\n\n"
+                "<i>Пример: BTC ETH SOL\nИли: BTC, ETH, SOL</i>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отмена", callback_data="back")]])
+            )
+        )
+        return
+    
+    elif data == "refresh_symbols":
+        await q.answer("Обновляем список пар...", show_alert=False)
+        success = await load_symbols()
+        message = f"✅ Пар доступно: {len(ALL_SYMBOLS)}" if success else "⚠️ Не удалось обновить"
+        await telegram_limiter.call(
+            q.edit_message_text(message, reply_markup=main_menu())
+        )
+        return
+    
     elif data == "list":
         alerts_count = len(user_settings.get(chat_id, []))
         text = f"📋 Ваши алерты: {alerts_count}" if alerts_count > 0 else "ℹ️ Нет алертов"
@@ -562,13 +803,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         kb = []
-        for i, s in enumerate(user_settings[chat_id][:10]):
+        for i, s in enumerate(user_settings[chat_id][:15]):
             status = "🔔" if s.get("notifications_enabled", True) else "🔕"
             kb.append([InlineKeyboardButton(
                 f"{i+1}. {s['symbol']} {s['interval']} ≥{s['threshold']:,} {status}", 
                 callback_data=f"del_{i}"
             )])
-        kb.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
+        kb.append([InlineKeyboardButton("🔙 Назад", callback_data="list")])
         
         await telegram_limiter.call(
             q.edit_message_text("❌ Выберите алерт:", reply_markup=InlineKeyboardMarkup(kb))
@@ -614,6 +855,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_alert_simple(update, context, idx)
         return
     
+    elif data.startswith("edit_"):
+        idx = int(data.split("_")[1])
+        if idx < len(user_settings[chat_id]):
+            user_state[chat_id] = "edit_interval"
+            user_temp[chat_id] = {"edit_idx": idx, "symbol": user_settings[chat_id][idx]["symbol"]}
+            await telegram_limiter.call(
+                q.edit_message_text(
+                    f"✏️ Редактирование:\n{user_settings[chat_id][idx]['symbol']}\n\nВыберите таймфрейм:",
+                    reply_markup=intervals_kb()
+                )
+            )
+        return
+    
     elif data.startswith("del_"):
         idx = int(data.split("_")[1])
         if idx < len(user_settings[chat_id]):
@@ -630,61 +884,151 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Добавление алертов
     elif data.startswith("int_"):
         interval = data.split("_")[1]
-        user_temp[chat_id] = {"interval": interval}
-        user_state[chat_id] = "wait_threshold"
         
-        await telegram_limiter.call(
-            q.edit_message_text(
-                f"Таймфрейм: {interval}\nВыберите порог:",
-                reply_markup=volume_kb()
+        if "symbols" in user_temp.get(chat_id, {}):
+            # Для нескольких монет
+            user_temp[chat_id]["interval"] = interval
+            user_state[chat_id] = "wait_threshold"
+            
+            count = len(user_temp[chat_id]["symbols"])
+            await telegram_limiter.call(
+                q.edit_message_text(
+                    f"✅ Таймфрейм: {interval}\n"
+                    f"<b>Количество пар:</b> {count}\n\n"
+                    f"Выберите порог для всех {count} пар:",
+                    parse_mode="HTML",
+                    reply_markup=volume_kb()
+                )
             )
-        )
+        elif user_state.get(chat_id) == "edit_interval":
+            # Редактирование
+            idx = user_temp[chat_id]["edit_idx"]
+            user_settings[chat_id][idx]["interval"] = interval
+            user_state[chat_id] = "edit_threshold"
+            user_temp[chat_id]["interval"] = interval
+            
+            await telegram_limiter.call(
+                q.edit_message_text(
+                    f"🆕 Таймфрейм: {interval}\n"
+                    f"<b>Пара:</b> {user_temp[chat_id]['symbol']}\n\n"
+                    f"Выберите порог:",
+                    parse_mode="HTML",
+                    reply_markup=volume_kb()
+                )
+            )
+        else:
+            # Одна монета
+            user_temp[chat_id]["interval"] = interval
+            user_state[chat_id] = "wait_threshold"
+            
+            await telegram_limiter.call(
+                q.edit_message_text(
+                    f"✅ Таймфрейм: {interval}\n"
+                    f"<b>Пара:</b> {user_temp[chat_id]['symbol']}\n\n"
+                    f"Выберите порог:",
+                    parse_mode="HTML",
+                    reply_markup=volume_kb()
+                )
+            )
         return
     
     elif data.startswith("volbtn_"):
         volume = int(data.split("_")[1])
         
-        if user_state.get(chat_id) == "wait_symbol_custom":
-            # Обработка кастомного символа
-            sym = user_temp[chat_id].get("symbol", "").upper()
-            if not sym.endswith("USDT"):
-                sym += "USDT"
+        if "symbols" in user_temp.get(chat_id, {}):
+            # Несколько монет
+            symbols = user_temp[chat_id]["symbols"]
+            interval = user_temp[chat_id]["interval"]
+            added_count = 0
             
-            if sym in ALL_SYMBOLS:
-                alert = {
-                    "symbol": sym,
-                    "interval": user_temp[chat_id]["interval"],
-                    "threshold": volume,
-                    "last_notified": 0,
-                    "notifications_enabled": True,
-                }
-                user_settings[chat_id].append(alert)
-                save_settings()
+            for sym in symbols:
+                existing = False
+                for alert in user_settings.get(chat_id, []):
+                    if alert["symbol"] == sym and alert["interval"] == interval:
+                        existing = True
+                        break
                 
-                await telegram_limiter.call(
-                    q.edit_message_text(
-                        f"✅ Добавлен: {sym} {alert['interval']} ≥{volume:,}",
-                        reply_markup=main_menu()
-                    )
-                )
-                user_state.pop(chat_id, None)
-                user_temp.pop(chat_id, None)
-            else:
-                await telegram_limiter.call(
-                    q.edit_message_text(
-                        f"❌ Пара {sym} не найдена",
-                        reply_markup=main_menu()
-                    )
-                )
+                if not existing:
+                    alert = {
+                        "symbol": sym,
+                        "interval": interval,
+                        "threshold": volume,
+                        "last_notified": 0,
+                        "notifications_enabled": True,
+                    }
+                    user_settings[chat_id].append(alert)
+                    added_count += 1
+            
+            save_settings()
+            
+            message = (
+                f"✅ Добавлено <b>{added_count}</b> алертов!\n\n"
+                f"<b>Таймфрейм:</b> {interval}\n"
+                f"<b>Порог:</b> {volume:,} USDT\n"
+                f"<b>Всего алертов:</b> {len(user_settings[chat_id])}"
+            )
+            
+            user_state.pop(chat_id, None)
+            user_temp.pop(chat_id, None)
+            
+        elif user_state.get(chat_id) == "edit_threshold":
+            # Редактирование
+            idx = user_temp[chat_id]["edit_idx"]
+            user_settings[chat_id][idx]["threshold"] = volume
+            save_settings()
+            
+            alert = user_settings[chat_id][idx]
+            message = f"✅ Обновлено: {alert['symbol']} {alert['interval']} ≥{volume:,}"
+            
+            user_state.pop(chat_id, None)
+            user_temp.pop(chat_id, None)
+        else:
+            # Одна монета
+            alert = {
+                "symbol": user_temp[chat_id]["symbol"],
+                "interval": user_temp[chat_id]["interval"],
+                "threshold": volume,
+                "last_notified": 0,
+                "notifications_enabled": True,
+            }
+            user_settings[chat_id].append(alert)
+            save_settings()
+            
+            message = (
+                f"✅ Добавлен: {alert['symbol']} {alert['interval']} ≥{volume:,}\n"
+                f"<b>Всего алертов:</b> {len(user_settings[chat_id])}"
+            )
+            
+            user_state.pop(chat_id, None)
+            user_temp.pop(chat_id, None)
+        
+        await telegram_limiter.call(
+            q.edit_message_text(message, parse_mode="HTML", reply_markup=main_menu())
+        )
         return
     
     elif data == "vol_custom":
-        user_state[chat_id] = "wait_threshold_custom"
+        if "symbols" in user_temp.get(chat_id, {}):
+            state = "wait_threshold_custom"
+        elif user_state.get(chat_id) == "edit_threshold":
+            state = "edit_threshold_custom"
+        else:
+            state = "wait_threshold_custom"
+        
+        user_state[chat_id] = state
+        
         await telegram_limiter.call(
             q.edit_message_text(
-                "Введите порог (например: 15000):",
+                "Введите порог объема (например: 15000):",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="back")]])
             )
+        )
+        return
+    
+    elif data == "refresh_all":
+        await q.answer("Обновление...", show_alert=False)
+        await telegram_limiter.call(
+            q.edit_message_text("🔄 Обновление...", reply_markup=list_kb(chat_id))
         )
         return
 
@@ -718,7 +1062,8 @@ async def post_init(application: Application):
                 f"⏰ <b>Время:</b> {datetime.now().strftime('%H:%M')}\n"
                 f"📊 <b>Пар:</b> {len(ALL_SYMBOLS)}\n"
                 f"🔔 <b>Алертов:</b> {total_alerts}\n\n"
-                f"<i>Статусные уведомления каждые 2 часа</i>",
+                f"<i>Статусные уведомления каждые 2 часа</i>\n"
+                f"<i>Поддерживается добавление нескольких монет</i>",
                 parse_mode="HTML"
             )
         )
@@ -757,6 +1102,7 @@ async def root():
         "service": "mexc-bot",
         "alerts": total_alerts,
         "symbols": len(ALL_SYMBOLS),
+        "features": ["multiple-coins", "2h-status", "rate-limited"],
         "uptime": int(time.time() - _start_time)
     }
 
@@ -798,7 +1144,7 @@ def main():
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, any_message))
         application.add_handler(CallbackQueryHandler(button_handler))
         
-        # Запускаем веб-сервер в отдельном потоке если на Render
+        # Запускаем веб-сервер если на Render
         if IS_RENDER:
             web_thread = threading.Thread(target=run_web_server, daemon=True)
             web_thread.start()
@@ -810,7 +1156,7 @@ def main():
             drop_pending_updates=True,
             timeout=30,
             close_loop=False,
-            poll_interval=0.5,  # Увеличиваем интервал
+            poll_interval=0.5,
             bootstrap_retries=-1,
             allowed_updates=Update.ALL_TYPES
         )
@@ -821,11 +1167,9 @@ def main():
         main()  # Перезапуск
 
 if __name__ == "__main__":
-    # Настройка для Windows
     if os.name == 'nt':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     
-    # Запуск
     main()
 
 
