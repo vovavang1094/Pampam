@@ -10,15 +10,6 @@ services:
     envVars:
       - key: PORT
         value: 8000
-      # Эти переменные нужно будет задать в Dashboard Render
-      - key: TELEGRAM_TOKEN
-        sync: false
-      - key: ALLOWED_USER_ID
-        sync: false
-      - key: MEXC_API_KEY
-        sync: false
-      - key: MEXC_SECRET_KEY
-        sync: false
     healthCheckPath: /health
     autoDeploy: true
     plan: free
@@ -26,4 +17,5 @@ services:
       name: alerts-data
       mountPath: /opt/render/project/src/data
       sizeGB: 1
+
 
